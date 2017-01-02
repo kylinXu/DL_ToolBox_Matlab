@@ -1,0 +1,48 @@
+function rbm = rbmtrain(rbm, x, opts)
+    assert(isfloat(x), 'x must be a float');
+        
+    m = size(x, 1);% 样本数
+    numbatches = floor(m / opts.batchsize);% 块数量
+    cdn = rbm.cdn;% CDk
+        
+    for i = 1 : opts.numepochs  % 迭代次数  
+        kk = randperm(m);% 打乱顺序
+        err = 0;% 损失函数
+        for l = 1 : numbatches
+            batch = extractminibatch(kk,l,opts.batchsize,x);% 每次抽batchsize个样本 i.e., 100个
+            batchsize = size(batch,1);  % actual batchsize (last batch may be larger then others)
+            
+            v = cell(cdn + 1,1);
+            h = cell(cdn + 1,1);
+            h_sample = cell(cdn + 1,1);% 采样
+            
+            % always (even last step, just don't use samples) sample hidden units
+            % never sample visible units
+            v{1} = batch; % 开始用输入样本初始化
+            [h{1}, h_sample{1}] = rbmup(rbm,v{1});% 向上传 
+                        
+            for k = 2 : cdn + 1
+                v{k} = rbmdown(rbm,h_sample{k-1});% （用二值化的数据重构原始数据） 向下传 （和向上传 一样实现） 有点不一样的是 如果输入不是二值的， 这里也不用二值化
+                [h{k}, h_sample{k}] = rbmup(rbm,v{k}); % 向上传
+                
+            end;
+            
+            % use probabilities, not sampled values, for collecting statistics
+            phase_pos = h{1}' * v{1};        % 前向计算过程（positive phase） 数据项
+            phase_neg = h{cdn + 1}' * v{cdn + 1}; % 重构项
+
+            rbm.vW = rbm.momentum * rbm.vW + rbm.alpha * (phase_pos - phase_neg)     / batchsize;
+            rbm.vb = rbm.momentum * rbm.vb + rbm.alpha * sum(v{1} - v{cdn + 1})' / batchsize;
+            rbm.vc = rbm.momentum * rbm.vc + rbm.alpha * sum(h{1} - h{cdn + 1})' / batchsize;
+
+            rbm.W = rbm.W + rbm.vW;
+            rbm.b = rbm.b + rbm.vb;
+            rbm.c = rbm.c + rbm.vc;
+
+            err = err + sum(sum((v{1} - v{cdn + 1}) .^ 2)) / batchsize;% l2 损失
+        end
+        
+        disp(['epoch ' num2str(i) '/' num2str(opts.numepochs)  '. Average reconstruction error is: ' num2str(err / numbatches)]);
+        
+    end 
+end
